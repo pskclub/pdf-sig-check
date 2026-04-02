@@ -118,6 +118,16 @@
   .sig-cert-title{font-family:var(--mono);font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
   .sig-cert-row{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:3px;word-break:break-all;line-height:1.4}
   .sig-cert-row span{color:var(--text)}
+  .sig-summary{padding:10px 18px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:#0f0f0f}
+  .sig-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--border)}
+  .sig-summary-cell{background:var(--surface);padding:9px 10px}
+  .sig-summary-k{font-family:var(--mono);font-size:.56rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px}
+  .sig-summary-v{font-family:var(--mono);font-size:.78rem;color:var(--text)}
+  .sig-summary-v.ok{color:var(--ok)}
+  .sig-summary-v.warn{color:var(--warn)}
+  .sig-meta-line{margin-top:9px;font-family:var(--mono);font-size:.66rem;color:var(--muted);line-height:1.5}
+  .sig-meta-line span{color:var(--text)}
+  @media(max-width:640px){.sig-summary-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -179,6 +189,7 @@
     <!-- Signatures section — hidden if none -->
     <div id="sigSection" style="display:none">
       <div class="section-label">Digital Signatures</div>
+      <div class="sig-summary" id="sigSummary"></div>
       <div id="sigList"></div>
     </div>
 
@@ -326,9 +337,14 @@ function setStep(id,s){const e=document.getElementById(id);if(e)e.className='ste
 
 function parsePdfDate(str) {
   if (!str) return '—';
-  const m = str.replace(/^D:/,'').match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  const s = String(str).trim().replace(/^D:/,'');
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(Z|[+\-]\d{2}'?\d{2}'?)?/);
   if (!m) return str;
-  return `${m[1]}-${m[2]}-${m[3]}  ${m[4]}:${m[5]}:${m[6]}`;
+  const tzRaw = m[7] || '';
+  let tz = '';
+  if (tzRaw === 'Z') tz = ' +00:00';
+  else if (tzRaw) tz = ' ' + tzRaw.replace(/'/g,'').replace(/^([+\-]\d{2})(\d{2})$/, '$1:$2');
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}${tz}`;
 }
 
 // ---- Certificate parsing with node-forge ----
@@ -373,7 +389,19 @@ async function parseCertificatesFromPkcs7(rawBytes) {
 // render signature cards
 function renderSignatures(sigs) {
   const section = document.getElementById('sigSection');
+  const summary = document.getElementById('sigSummary');
   const list    = document.getElementById('sigList');
+  const esc = (v) => String(v ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+  const getCN = (dn) => {
+    if (!dn || typeof dn !== 'string') return null;
+    const m = dn.match(/(?:^|,\s*)CN=([^,]+)/i);
+    return m ? m[1].trim() : null;
+  };
 
   if (!sigs || sigs.length === 0) {
     section.style.display = 'none';
@@ -381,10 +409,37 @@ function renderSignatures(sigs) {
   }
 
   section.style.display = 'block';
+  const signedCount = sigs.filter(s => s.isSigned).length;
+  const unsignedCount = sigs.length - signedCount;
+  const totalCerts = sigs.reduce((sum, s) => sum + ((s.certs || []).length), 0);
+  const hasTimestamp = sigs.some(s => s.isSigned && s.signingTime);
+  summary.innerHTML = `
+    <div class="sig-summary-grid">
+      <div class="sig-summary-cell">
+        <div class="sig-summary-k">Fields</div>
+        <div class="sig-summary-v">${sigs.length}</div>
+      </div>
+      <div class="sig-summary-cell">
+        <div class="sig-summary-k">Signed</div>
+        <div class="sig-summary-v ok">${signedCount}</div>
+      </div>
+      <div class="sig-summary-cell">
+        <div class="sig-summary-k">Unsigned</div>
+        <div class="sig-summary-v ${unsignedCount ? 'warn' : ''}">${unsignedCount}</div>
+      </div>
+      <div class="sig-summary-cell">
+        <div class="sig-summary-k">Certificates</div>
+        <div class="sig-summary-v">${totalCerts || '—'}</div>
+      </div>
+    </div>
+    <div class="sig-meta-line">
+      Signature timestamp:
+      <span>${hasTimestamp ? 'พบข้อมูลเวลาเซ็น' : 'ไม่พบข้อมูลเวลาเซ็น'}</span>
+    </div>`;
 
   const cards = sigs.map((sig, idx) => {
     const signed    = sig.isSigned;
-    const name      = sig.name     || '—';
+    const rawName   = sig.name     || '—';
     const time      = parsePdfDate(sig.signingTime);
     const reason    = sig.reason   || '—';
     const location  = sig.location || '—';
@@ -392,25 +447,28 @@ function renderSignatures(sigs) {
     const filter    = sig.filter   || '—';
     const subFilter = sig.subFilter|| '—';
     const fieldName = sig.fieldName|| `Signature${idx+1}`;
+    const byteRange = sig.byteRange || '—';
     const certs     = sig.certs    || [];
 
     // signer cert = last cert (leaf), CA cert = first
     const signerCert = certs.length > 0 ? certs[certs.length-1] : null;
     const caCert     = certs.length > 1 ? certs[0] : null;
+    const certCnName = signerCert ? (getCN(signerCert.subject) || null) : null;
+    const name = rawName !== '—' ? rawName : (certCnName || '—');
 
     const certSection = signerCert ? `
       <div class="sig-cert">
-        <div class="sig-cert-title">Signer Certificate</div>
-        <div class="sig-cert-row">Subject: <span>${signerCert.subject || '—'}</span></div>
-        <div class="sig-cert-row">Issuer: <span>${signerCert.issuer || '—'}</span></div>
-        <div class="sig-cert-row">Serial: <span>${signerCert.serial || '—'}</span></div>
-        <div class="sig-cert-row">Valid: <span>${signerCert.notBefore} → ${signerCert.notAfter}</span></div>
+        <div class="sig-cert-title">Signer Cert</div>
+        <div class="sig-cert-row"><span>${esc(signerCert.subject || '—')}</span></div>
+        <div class="sig-cert-row">issued by <span>${esc(signerCert.issuer || '—')}</span></div>
+        <div class="sig-cert-row">Serial: <span>${esc(signerCert.serial || '—')}</span></div>
+        <div class="sig-cert-row">Valid: <span>${esc(signerCert.notBefore)} → ${esc(signerCert.notAfter)}</span></div>
       </div>
       ${caCert ? `
       <div class="sig-cert" style="margin-top:6px">
-        <div class="sig-cert-title">CA Certificate</div>
-        <div class="sig-cert-row">Subject: <span>${caCert.subject || '—'}</span></div>
-        <div class="sig-cert-row">Valid: <span>${caCert.notBefore} → ${caCert.notAfter}</span></div>
+        <div class="sig-cert-title">CA Cert</div>
+        <div class="sig-cert-row"><span>${esc(caCert.subject || '—')}</span></div>
+        <div class="sig-cert-row">Valid: <span>${esc(caCert.notBefore)} → ${esc(caCert.notAfter)}</span></div>
       </div>` : ''}
     ` : '';
 
@@ -418,19 +476,21 @@ function renderSignatures(sigs) {
     <div class="sig-card">
       <div class="sig-card-header">
         <div class="sig-card-name">
-          <span style="color:var(--muted);font-weight:400">#${idx+1}</span>&nbsp;${fieldName}
-          ${name !== '—' ? `<span style="color:var(--accent2);font-weight:400"> · ${name}</span>` : ''}
+          <span style="color:var(--muted);font-weight:400">#${idx+1}</span>&nbsp;${esc(fieldName)}
+          ${name !== '—' ? `<span style="color:var(--accent2);font-weight:400"> · ${esc(name)}</span>` : ''}
         </div>
         <div class="sig-validity ${signed?'signed':'unsigned'}">${signed?'✓ SIGNED':'UNSIGNED'}</div>
       </div>
       ${signed ? `
       <div class="sig-fields-grid">
-        <div class="sig-field"><div class="k">Signer Name</div><div class="v ${name==='—'?'dim':''}">${name}</div></div>
-        <div class="sig-field"><div class="k">Signing Time</div><div class="v ${time==='—'?'dim':''}">${time}</div></div>
-        <div class="sig-field"><div class="k">Reason</div><div class="v ${reason==='—'?'dim':''}">${reason}</div></div>
-        <div class="sig-field"><div class="k">Location</div><div class="v ${location==='—'?'dim':''}">${location}</div></div>
-        <div class="sig-field"><div class="k">Contact</div><div class="v ${contact==='—'?'dim':''}">${contact}</div></div>
-        <div class="sig-field"><div class="k">Filter / SubFilter</div><div class="v dim">${filter} / ${subFilter}</div></div>
+        <div class="sig-field"><div class="k">Signer Name</div><div class="v ${name==='—'?'dim':''}">${esc(name)}</div></div>
+        <div class="sig-field"><div class="k">Signing Time</div><div class="v ${time==='—'?'dim':''}">${esc(time)}</div></div>
+        <div class="sig-field"><div class="k">Reason</div><div class="v ${reason==='—'?'dim':''}">${esc(reason)}</div></div>
+        <div class="sig-field"><div class="k">Location</div><div class="v ${location==='—'?'dim':''}">${esc(location)}</div></div>
+        <div class="sig-field"><div class="k">Contact</div><div class="v ${contact==='—'?'dim':''}">${esc(contact)}</div></div>
+        <div class="sig-field"><div class="k">Filter / SubFilter</div><div class="v dim">${esc(filter)} / ${esc(subFilter)}</div></div>
+        <div class="sig-field"><div class="k">ByteRange</div><div class="v dim">${esc(byteRange)}</div></div>
+        <div class="sig-field"><div class="k">Cert Chain</div><div class="v ${certs.length ? 'green' : 'dim'}">${certs.length ? esc(String(certs.length)+' cert(s)') : '—'}</div></div>
       </div>
       ${certSection}
       ` : `<div style="font-family:var(--mono);font-size:.76rem;color:var(--muted)">ยังไม่ได้เซ็น — field ว่างอยู่</div>`}
@@ -441,117 +501,362 @@ function renderSignatures(sigs) {
 }
 
 // extract all signature fields + values from AcroForm
-async function extractSignatures(pdfDoc, context) {
+async function extractSignatures(pdfDoc, context, rawBytes = null) {
   const catalog  = pdfDoc.catalog;
   const acroForm = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
   if (!acroForm) return [];
 
   const fields = acroForm.lookupMaybe(PDFName.of('Fields'), PDFArray);
-  if (!fields || fields.size() === 0) return [];
-
   const sigs = [];
 
-  // ดึง raw bytes จาก pdf-lib object (รองรับทั้ง String และ hex string)
   function getRawBytes(obj) {
     try {
-      // pdf-lib PDFHexString → .decodeText() จะได้ binary string
-      // pdf-lib PDFString → .decodeText() จะได้ text
-      // วิธีที่ reliable ที่สุดคือ encode กลับเป็น bytes
-      const raw = obj.value !== undefined ? obj.value
-                : obj.encodedName !== undefined ? null
-                : null;
-
+      const raw = obj.value !== undefined ? obj.value : null;
       if (raw !== null && raw !== undefined) {
-        // เป็น Uint8Array หรือ string
         if (raw instanceof Uint8Array) return raw;
-        if (typeof raw === 'string') {
-          return new Uint8Array([...raw].map(c => c.charCodeAt(0) & 0xff));
-        }
+        if (typeof raw === 'string') return new Uint8Array([...raw].map(c => c.charCodeAt(0) & 0xff));
       }
-
-      // fallback: ลอง toString แล้วดูว่าเป็น binary
       const s = obj.toString();
-      // remove surrounding parens if PDF string
-      const inner = s.startsWith('(') && s.endsWith(')')
-        ? s.slice(1,-1)
-        : s;
+      const inner = s.startsWith('(') && s.endsWith(')') ? s.slice(1, -1) : s;
       return new Uint8Array([...inner].map(c => c.charCodeAt(0) & 0xff));
     } catch(_) { return null; }
   }
 
-  async function walkField(ref) {
+  function readPdfText(dict, key) {
     try {
-      const fd   = context.lookup(ref, PDFDict);
-      const ft   = fd.lookupMaybe(PDFName.of('FT'), PDFName);
-      const kids = fd.lookupMaybe(PDFName.of('Kids'), PDFArray);
-
-      if (kids) {
-        for (let i=0; i<kids.size(); i++) await walkField(kids.get(i));
-        return;
+      const obj = dict.lookupMaybe(PDFName.of(key));
+      if (!obj) return null;
+      try { return obj.decodeText(); } catch(_) {}
+      return obj.toString().replace(/^\(|\)$/g, '').trim() || null;
+    } catch(_) { return null; }
+  }
+  function decodePdfLiteralString(s) {
+    if (!s) return '';
+    let out = String(s);
+    // octal escapes: \040 => space, \100 => @, \056 => .
+    out = out.replace(/\\([0-7]{1,3})/g, (_, oct) => {
+      const code = parseInt(oct, 8);
+      return Number.isFinite(code) ? String.fromCharCode(code) : _;
+    });
+    out = out
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\b/g, '\b')
+      .replace(/\\f/g, '\f')
+      .replace(/\\\(/g, '(')
+      .replace(/\\\)/g, ')')
+      .replace(/\\\\/g, '\\');
+    return out.trim();
+  }
+  function decodePdfNameToken(s) {
+    if (!s) return '';
+    return String(s).replace(/#([0-9A-Fa-f]{2})/g, (_, hx) => {
+      const code = parseInt(hx, 16);
+      return Number.isFinite(code) ? String.fromCharCode(code) : _;
+    }).trim();
+  }
+  async function parseSigFromRawBytes(bytes) {
+    try {
+      const dec = new TextDecoder('latin1');
+      const txt = dec.decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+      const blocks = [];
+      let cursor = 0;
+      while (true) {
+        const sigPos = txt.indexOf('/Type /Sig', cursor);
+        if (sigPos < 0) break;
+        const start = txt.lastIndexOf('<<', sigPos);
+        let end = txt.indexOf('endobj', sigPos);
+        if (end < 0) end = Math.min(txt.length, sigPos + 250000);
+        else end += 6;
+        const block = txt.slice(start >= 0 ? start : Math.max(0, sigPos - 2000), end);
+        blocks.push(block);
+        cursor = sigPos + 9;
+        if (blocks.length > 10) break;
       }
-      if (!ft || ft.asString() !== '/Sig') return;
-
-      const fieldName = (() => {
-        try { return fd.lookup(PDFName.of('T')).decodeText(); } catch(_) {
-          try { return fd.lookup(PDFName.of('T')).toString().replace(/[()]/g,''); } catch(_) { return '—'; }
-        }
-      })();
-
-      const vRef = fd.lookupMaybe(PDFName.of('V'));
-      if (!vRef) { sigs.push({ fieldName, isSigned: false }); return; }
-
-      let vd;
-      try { vd = context.lookup(vRef, PDFDict); } catch(_) { sigs.push({ fieldName, isSigned: false }); return; }
-
-      // helper: get string value
-      const getStr = (key) => {
-        try {
-          const v = vd.lookupMaybe(PDFName.of(key));
-          if (!v) return null;
-          try { return v.decodeText(); } catch(_) {}
-          const s = v.toString();
-          return s.replace(/^\(|\)$/g,'').trim() || null;
-        } catch(_) { return null; }
-      };
-
-      const filterVal    = (() => { try { return vd.lookup(PDFName.of('Filter')).asString().replace('/',''); } catch(_) { return '—'; } })();
-      const subFilterVal = (() => { try { return vd.lookup(PDFName.of('SubFilter')).asString().replace('/',''); } catch(_) { return '—'; } })();
-
-      // ByteRange
-      let byteRange = '—';
-      try {
-        const br = vd.lookupMaybe(PDFName.of('ByteRange'), PDFArray);
-        if (br) byteRange = Array.from({length:br.size()},(_,i)=>br.get(i)).join(', ');
-      } catch(_) {}
-
-      // PKCS7 certificate parsing
-      let certs = [];
-      try {
-        const contentsObj = vd.lookupMaybe(PDFName.of('Contents'));
-        if (contentsObj) {
-          const bytes = getRawBytes(contentsObj);
-          if (bytes && bytes.length > 4 && bytes[0] === 0x30) {
-            certs = await parseCertificatesFromPkcs7(bytes);
+      const out = [];
+      for (const b of blocks) {
+        const pickLit = (k) => {
+          const m = b.match(new RegExp(`/${k}\\s*\\(([^)]*)\\)`));
+          return m ? decodePdfLiteralString(m[1]) : null;
+        };
+        const pickName = (k) => {
+          const m = b.match(new RegExp(`/${k}\\s*/([^\\s<>\\[\\]()]+)`));
+          return m ? decodePdfNameToken(m[1]) : null;
+        };
+        const pickHexContents = () => {
+          const m = b.match(/\/Contents\s*<([\s\S]*?)>/);
+          if (!m) return null;
+          const hex = (m[1] || '').replace(/[^0-9A-Fa-f]/g, '');
+          if (!hex || hex.length < 4) return null;
+          const evenHex = hex.length % 2 === 0 ? hex : hex.slice(0, -1);
+          if (evenHex.length < 4) return null;
+          const bytes = new Uint8Array(evenHex.length / 2);
+          for (let i = 0; i < evenHex.length; i += 2) {
+            bytes[i/2] = parseInt(evenHex.slice(i, i+2), 16);
           }
-        }
-      } catch(_) {}
+          return bytes;
+        };
+        const tryParseCerts = async (contentsBytes) => {
+          if (!contentsBytes || contentsBytes.length < 4) return [];
+          let end = contentsBytes.length;
+          // Some PDFs pad /Contents with trailing 00 bytes for fixed-length placeholder.
+          while (end > 4 && contentsBytes[end - 1] === 0) end--;
+          const candidate = contentsBytes.slice(0, end);
+          if (candidate[0] !== 0x30) return [];
+          const certs = await parseCertificatesFromPkcs7(candidate);
+          if (certs && certs.length) return certs;
+          return [];
+        };
+        const mVal = pickLit('M');
+        const signerName = pickLit('Name') || pickName('Name');
+        const contentsBytes = pickHexContents();
+        const certs = await tryParseCerts(contentsBytes);
+        const sig = {
+          fieldName: `Signature(raw-${out.length+1})`,
+          isSigned: true,
+          name: signerName,
+          signingTime: mVal,
+          reason: pickLit('Reason'),
+          location: pickLit('Location'),
+          contact: pickLit('ContactInfo'),
+          filter: pickName('Filter') || '—',
+          subFilter: pickName('SubFilter') || '—',
+          byteRange: '—',
+          certs,
+          _sourceKey: `raw:${out.length+1}`,
+        };
+        const hasSomeData = sig.name || sig.signingTime || sig.reason || sig.location || sig.contact || sig.filter !== '—' || sig.subFilter !== '—';
+        if (hasSomeData) out.push(sig);
+      }
+      return out;
+    } catch(_) { return []; }
+  }
 
-      sigs.push({
-        fieldName, isSigned: true,
-        name:       getStr('Name'),
-        signingTime:getStr('M'),
-        reason:     getStr('Reason'),
-        location:   getStr('Location'),
-        contact:    getStr('ContactInfo'),
-        filter:     filterVal,
-        subFilter:  subFilterVal,
-        byteRange,  certs,
-      });
+  const resolveDict = (obj) => {
+    try {
+      if (!obj) return null;
+      if (obj instanceof PDFDict) return obj;
+      const looked = context.lookup(obj);
+      return looked instanceof PDFDict ? looked : null;
+    } catch(_) { return null; }
+  };
+  const getName = (dict, key) => {
+    try {
+      const n = dict.lookupMaybe(PDFName.of(key), PDFName);
+      return n ? n.asString() : null;
+    } catch(_) { return null; }
+  };
+  const getParent = (dict) => {
+    try {
+      const p = dict.lookupMaybe(PDFName.of('Parent'));
+      return p ? resolveDict(p) : null;
+    } catch(_) { return null; }
+  };
+  const collectChain = (dict, maxDepth = 16) => {
+    const chain = [];
+    let cur = dict;
+    let depth = 0;
+    while (cur && depth < maxDepth) {
+      chain.push(cur);
+      cur = getParent(cur);
+      depth++;
+    }
+    return chain;
+  };
+  const resolveFieldMeta = (dict) => {
+    const chain = collectChain(dict);
+    const names = [];
+    let ft = null;
+    let vObj = null;
+    let subtype = null;
+    let hasLockOrSV = false;
+
+    for (const d of chain.slice().reverse()) {
+      const n = readPdfText(d, 'T');
+      if (n) names.push(n);
+    }
+    for (const d of chain) {
+      if (!ft) ft = getName(d, 'FT');
+      if (!vObj) {
+        try { vObj = d.lookupMaybe(PDFName.of('V')) || null; } catch(_) {}
+      }
+      if (!subtype) subtype = getName(d, 'Subtype');
+      if (!hasLockOrSV) {
+        try { hasLockOrSV = d.has(PDFName.of('Lock')) || d.has(PDFName.of('SV')); } catch(_) {}
+      }
+    }
+
+    return {
+      ft,
+      vObj,
+      subtype,
+      hasLockOrSV,
+      fieldName: names.join('.') || '—',
+    };
+  };
+
+  const seenSigned = new Set();
+  const seenUnsigned = new Set();
+  const addUnsigned = (fieldName, key) => {
+    const k = `${fieldName}|${key || ''}`;
+    if (seenUnsigned.has(k)) return;
+    seenUnsigned.add(k);
+    sigs.push({ fieldName, isSigned: false, _sourceKey: key || '' });
+  };
+
+  const addSignedFromValue = async (fieldName, vObj, keyHint = '') => {
+    const vd = resolveDict(vObj);
+    if (!vd) { addUnsigned(fieldName, keyHint); return; }
+
+    const getStr = (key) => {
+      try {
+        const v = vd.lookupMaybe(PDFName.of(key));
+        if (!v) return null;
+        try { return v.decodeText(); } catch(_) {}
+        return v.toString().replace(/^\(|\)$/g, '').trim() || null;
+      } catch(_) { return null; }
+    };
+
+    const filterVal    = (() => { try { return vd.lookup(PDFName.of('Filter')).asString().replace('/',''); } catch(_) { return '—'; } })();
+    const subFilterVal = (() => { try { return vd.lookup(PDFName.of('SubFilter')).asString().replace('/',''); } catch(_) { return '—'; } })();
+
+    let byteRange = '—';
+    try {
+      const br = vd.lookupMaybe(PDFName.of('ByteRange'), PDFArray);
+      if (br) {
+        byteRange = Array.from({ length: br.size() }, (_, i) => {
+          const it = br.get(i);
+          try { return String(it.asNumber()); } catch(_) { return it?.toString?.() || String(it); }
+        }).join(', ');
+      }
+    } catch(_) {}
+
+    let certs = [];
+    try {
+      const contentsObj = vd.lookupMaybe(PDFName.of('Contents'));
+      if (contentsObj) {
+        const bytes = getRawBytes(contentsObj);
+        if (bytes && bytes.length > 4 && bytes[0] === 0x30) certs = await parseCertificatesFromPkcs7(bytes);
+      }
+    } catch(_) {}
+
+    const signedKey = vObj?.toString?.() || `${fieldName}|${byteRange}|${keyHint}`;
+    if (seenSigned.has(signedKey)) return;
+    seenSigned.add(signedKey);
+    sigs.push({
+      fieldName, isSigned: true,
+      name:       getStr('Name'),
+      signingTime:getStr('M'),
+      reason:     getStr('Reason'),
+      location:   getStr('Location'),
+      contact:    getStr('ContactInfo'),
+      filter:     filterVal,
+      subFilter:  subFilterVal,
+      byteRange,  certs,
+      _sourceKey: vObj?.toString?.() || keyHint || '',
+    });
+  };
+
+  const visited = new Set();
+  const processCandidate = async (dict, keyHint) => {
+    const meta = resolveFieldMeta(dict);
+    const probableSig = meta.ft === '/Sig'
+      || (meta.subtype === '/Widget' && (!!meta.vObj || /sig|signature/i.test(meta.fieldName) || meta.hasLockOrSV));
+    if (!probableSig) return;
+    if (meta.vObj) await addSignedFromValue(meta.fieldName, meta.vObj, keyHint);
+    else addUnsigned(meta.fieldName, keyHint);
+  };
+
+  const walkField = async (obj, path = '') => {
+    const d = resolveDict(obj);
+    if (!d) return;
+    const key = obj?.toString?.() || `${path}:obj`;
+    if (visited.has(key)) return;
+    visited.add(key);
+
+    await processCandidate(d, key);
+
+    const kids = d.lookupMaybe(PDFName.of('Kids'), PDFArray);
+    if (!kids) return;
+    for (let i=0; i<kids.size(); i++) {
+      await walkField(kids.get(i), `${path}.${i}`);
+    }
+  };
+
+  if (fields && fields.size() > 0) {
+    for (let i=0; i<fields.size(); i++) await walkField(fields.get(i), `f${i}`);
+  }
+
+  // Fallback scan from widget annotations
+  const pages = pdfDoc.getPages();
+  for (const page of pages) {
+    try {
+      const pd = resolveDict(page.ref);
+      if (!pd) continue;
+      const annots = pd.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (!annots) continue;
+      for (let i=0; i<annots.size(); i++) {
+        const ref = annots.get(i);
+        const annot = resolveDict(ref);
+        if (!annot) continue;
+        const subtype = getName(annot, 'Subtype');
+        if (subtype !== '/Widget') continue;
+        let keyHint = `annot:${ref?.toString?.() || `${i}`}`;
+        try {
+          const p = annot.lookupMaybe(PDFName.of('Parent'));
+          if (p) keyHint = `parent:${p?.toString?.() || keyHint}`;
+        } catch(_) {}
+        await processCandidate(annot, keyHint);
+      }
     } catch(_) {}
   }
 
-  for (let i=0; i<fields.size(); i++) await walkField(fields.get(i));
-  return sigs;
+  // Last-resort fallback: มี fields แต่ยังอ่านชนิดไม่ได้ ให้แสดง unsigned อย่างน้อย
+  if (sigs.length === 0 && fields && fields.size() > 0) {
+    for (let i=0; i<fields.size(); i++) {
+      const fd = resolveDict(fields.get(i));
+      const n = fd ? readPdfText(fd, 'T') : null;
+      addUnsigned(n || `Field${i+1}`, `fallback:${i}`);
+    }
+  }
+
+  // Normalize duplicates:
+  // 1) prefer signed over unsigned for same field
+  // 2) dedupe signed entries by value identity/byteRange
+  const signedFieldNames = new Set(
+    sigs.filter(s => s.isSigned).map(s => (s.fieldName || '').trim().toLowerCase())
+  );
+  const normalized = [];
+  const seenNorm = new Set();
+  for (const sig of sigs) {
+    const nameKey = (sig.fieldName || '').trim().toLowerCase();
+    if (!sig.isSigned && signedFieldNames.has(nameKey)) continue;
+
+    const signedKey = sig.isSigned
+      ? (sig.byteRange && sig.byteRange !== '—'
+          ? `signed:br:${sig.byteRange}`
+          : (sig._sourceKey ? `signed:src:${sig._sourceKey}` : `signed:name:${nameKey}`))
+      : (sig._sourceKey ? `unsigned:src:${sig._sourceKey}` : `unsigned:name:${nameKey}`);
+
+    if (seenNorm.has(signedKey)) continue;
+    seenNorm.add(signedKey);
+    normalized.push(sig);
+  }
+
+  // Raw fallback: some signed PDFs expose /Type /Sig in bytes but not resolvable /V via pdf-lib
+  if (!normalized.some(s => s.isSigned) && rawBytes) {
+    const rawSigs = await parseSigFromRawBytes(rawBytes);
+    if (rawSigs.length > 0) return rawSigs;
+  }
+
+  // If only unsigned and count is suspiciously higher than AcroForm fields,
+  // clamp to fields count to avoid duplicate widget/field placeholders.
+  if (!normalized.some(s => s.isSigned) && fields && fields.size() > 0 && normalized.length > fields.size()) {
+    return normalized.slice(0, fields.size());
+  }
+
+  return normalized;
 }
 function pageSizeName(w,h) {
   const rw=Math.round(w), rh=Math.round(h);
@@ -663,7 +968,7 @@ async function analyzePdf(bytes) {
   };
 
   // extract existing signatures
-  const signatures = await extractSignatures(pdfDoc, context);
+  const signatures = await extractSignatures(pdfDoc, context, bytes);
 
   return {
     pdfVer, pageCount: pages.length,
@@ -731,7 +1036,6 @@ async function handleFile(file) {
   if (!a.hasAcroForm) issuesList.push({type:'err', msg:'ไม่มี /AcroForm ใน Catalog'});
   if (!a.hasDR)       issuesList.push({type:'err', msg:'ไม่มี /DR (Default Resources)'});
   if (!a.hasSig)      issuesList.push({type:'err', msg:'/SigFlags ไม่ถูกต้อง'});
-
   const issuesBox = document.getElementById('issuesBox');
   issuesBox.innerHTML = issuesList.length
     ? '<div class="issues-title">Issues ที่พบ</div>' + issuesList.map(i=>`<div class="issue-item ${i.type}">${i.msg}</div>`).join('')

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -5,8 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>PDF Repair — AcroForm Fixer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-<script src="https://unpkg.com/asn1js@3.0.5/build/asn1.js"></script>
-<script src="https://unpkg.com/pkijs@3.0.15/build/pkijs.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Thai:wght@300;400;600&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -331,62 +331,36 @@ function parsePdfDate(str) {
   return `${m[1]}-${m[2]}-${m[3]}  ${m[4]}:${m[5]}:${m[6]}`;
 }
 
-// ---- Certificate parsing with pkijs ----
+// ---- Certificate parsing with node-forge ----
 async function parseCertificatesFromPkcs7(rawBytes) {
   try {
-    // asn1js + pkijs
-    const asn1 = asn1js.fromBER(rawBytes.buffer);
-    if (asn1.offset === -1) return [];
+    // แปลง Uint8Array → forge ByteStringBuffer
+    const der = forge.util.createBuffer(rawBytes);
 
-    const cms = new pkijs.ContentInfo({ schema: asn1.result });
-    if (cms.contentType !== '1.2.840.113549.1.7.2') return []; // not signedData
+    // parse PKCS#7 SignedData
+    const p7asn1 = forge.asn1.fromDer(der);
+    const p7     = forge.pkcs7.messageFromAsn1(p7asn1);
 
-    const signedData = new pkijs.SignedData({ schema: cms.content });
-    const certs = signedData.certificates || [];
+    const certs = p7.certificates || [];
 
     return certs.map(cert => {
-      const getAttr = (rdns, oid) => {
-        for (const rdn of rdns) {
-          for (const tv of rdn.typesAndValues) {
-            if (tv.type === oid) return tv.value.valueBlock.value;
-          }
-        }
-        return null;
-      };
-
-      const subj   = cert.subject.typesAndValues
-        ? cert.subject
-        : cert.subject;
-      const issuer = cert.issuer;
-
-      const formatDN = (name) => {
+      const getDN = (subject) => {
         const parts = [];
-        const tvs = name.typesAndValues || [];
-        const oidNames = {
-          '2.5.4.3':'CN','2.5.4.10':'O','2.5.4.11':'OU',
-          '2.5.4.6':'C','2.5.4.7':'L','2.5.4.8':'ST',
-          '1.2.840.113549.1.9.1':'email',
-        };
-        for (const tv of tvs) {
-          const label = oidNames[tv.type] || tv.type;
-          const val   = tv.value?.valueBlock?.value || '';
-          if (val) parts.push(`${label}=${val}`);
+        for (const attr of subject.attributes) {
+          const name = attr.shortName || attr.name || attr.type;
+          if (attr.value) parts.push(`${name}=${attr.value}`);
         }
         return parts.join(', ');
       };
 
-      const notBefore = cert.notBefore?.value;
-      const notAfter  = cert.notAfter?.value;
-      const serial    = cert.serialNumber?.valueBlock?.valueDec || 
-                        cert.serialNumber?.valueBlock?.valueHex
-                          ? Array.from(new Uint8Array(cert.serialNumber.valueBlock.valueHex))
-                              .map(b => b.toString(16).padStart(2,'0')).join(':')
-                          : '—';
+      const notBefore = cert.validity.notBefore;
+      const notAfter  = cert.validity.notAfter;
+      const serial    = cert.serialNumber;
 
       return {
-        subject:   formatDN(cert.subject),
-        issuer:    formatDN(cert.issuer),
-        serial,
+        subject:   getDN(cert.subject),
+        issuer:    getDN(cert.issuer),
+        serial:    serial ? serial.match(/.{2}/g)?.join(':') || serial : '—',
         notBefore: notBefore ? notBefore.toISOString().replace('T',' ').slice(0,19) : '—',
         notAfter:  notAfter  ? notAfter.toISOString().replace('T',' ').slice(0,19)  : '—',
       };
@@ -477,6 +451,34 @@ async function extractSignatures(pdfDoc, context) {
 
   const sigs = [];
 
+  // ดึง raw bytes จาก pdf-lib object (รองรับทั้ง String และ hex string)
+  function getRawBytes(obj) {
+    try {
+      // pdf-lib PDFHexString → .decodeText() จะได้ binary string
+      // pdf-lib PDFString → .decodeText() จะได้ text
+      // วิธีที่ reliable ที่สุดคือ encode กลับเป็น bytes
+      const raw = obj.value !== undefined ? obj.value
+                : obj.encodedName !== undefined ? null
+                : null;
+
+      if (raw !== null && raw !== undefined) {
+        // เป็น Uint8Array หรือ string
+        if (raw instanceof Uint8Array) return raw;
+        if (typeof raw === 'string') {
+          return new Uint8Array([...raw].map(c => c.charCodeAt(0) & 0xff));
+        }
+      }
+
+      // fallback: ลอง toString แล้วดูว่าเป็น binary
+      const s = obj.toString();
+      // remove surrounding parens if PDF string
+      const inner = s.startsWith('(') && s.endsWith(')')
+        ? s.slice(1,-1)
+        : s;
+      return new Uint8Array([...inner].map(c => c.charCodeAt(0) & 0xff));
+    } catch(_) { return null; }
+  }
+
   async function walkField(ref) {
     try {
       const fd   = context.lookup(ref, PDFDict);
@@ -489,70 +491,61 @@ async function extractSignatures(pdfDoc, context) {
       }
       if (!ft || ft.asString() !== '/Sig') return;
 
-      // field name
       const fieldName = (() => {
-        try { return fd.lookup(PDFName.of('T')).decodeText(); } catch(_) { return '—'; }
+        try { return fd.lookup(PDFName.of('T')).decodeText(); } catch(_) {
+          try { return fd.lookup(PDFName.of('T')).toString().replace(/[()]/g,''); } catch(_) { return '—'; }
+        }
       })();
 
       const vRef = fd.lookupMaybe(PDFName.of('V'));
       if (!vRef) { sigs.push({ fieldName, isSigned: false }); return; }
 
-      const vd = context.lookup(vRef, PDFDict);
+      let vd;
+      try { vd = context.lookup(vRef, PDFDict); } catch(_) { sigs.push({ fieldName, isSigned: false }); return; }
 
-      const str = (key) => {
+      // helper: get string value
+      const getStr = (key) => {
         try {
           const v = vd.lookupMaybe(PDFName.of(key));
           if (!v) return null;
           try { return v.decodeText(); } catch(_) {}
-          try { return v.toString().replace(/[()'"]/g,'').trim(); } catch(_) {}
-          return null;
+          const s = v.toString();
+          return s.replace(/^\(|\)$/g,'').trim() || null;
         } catch(_) { return null; }
       };
 
       const filterVal    = (() => { try { return vd.lookup(PDFName.of('Filter')).asString().replace('/',''); } catch(_) { return '—'; } })();
       const subFilterVal = (() => { try { return vd.lookup(PDFName.of('SubFilter')).asString().replace('/',''); } catch(_) { return '—'; } })();
 
-      // parse PKCS7 certificates
-      let certs = [];
-      try {
-        const contentsObj = vd.lookupMaybe(PDFName.of('Contents'));
-        if (contentsObj) {
-          const rawBytes = contentsObj.asBytes ? contentsObj.asBytes() : new Uint8Array(Buffer.from(contentsObj.toString().replace(/[^0-9a-fA-F]/g,''), 'hex'));
-          // pikepdf string — get as uint8 via encode
-          const str2 = contentsObj.toString();
-          // try direct bytes
-          let bytes;
-          if (str2.startsWith('<') && str2.endsWith('>')) {
-            bytes = new Uint8Array(str2.slice(1,-1).match(/.{2}/g).map(h=>parseInt(h,16)));
-          } else {
-            // raw string — encode as latin1 bytes
-            bytes = new Uint8Array([...str2].map(c => c.charCodeAt(0) & 0xff));
-          }
-          if (bytes[0] === 0x30) {
-            certs = await parseCertificatesFromPkcs7(bytes);
-          }
-        }
-      } catch(e) { /* cert parse failed */ }
-
       // ByteRange
       let byteRange = '—';
       try {
         const br = vd.lookupMaybe(PDFName.of('ByteRange'), PDFArray);
-        if (br) byteRange = Array.from({length: br.size()}, (_,i) => br.get(i)).join(', ');
+        if (br) byteRange = Array.from({length:br.size()},(_,i)=>br.get(i)).join(', ');
+      } catch(_) {}
+
+      // PKCS7 certificate parsing
+      let certs = [];
+      try {
+        const contentsObj = vd.lookupMaybe(PDFName.of('Contents'));
+        if (contentsObj) {
+          const bytes = getRawBytes(contentsObj);
+          if (bytes && bytes.length > 4 && bytes[0] === 0x30) {
+            certs = await parseCertificatesFromPkcs7(bytes);
+          }
+        }
       } catch(_) {}
 
       sigs.push({
-        fieldName,
-        isSigned:   true,
-        name:       str('Name'),
-        signingTime:str('M'),
-        reason:     str('Reason'),
-        location:   str('Location'),
-        contact:    str('ContactInfo'),
+        fieldName, isSigned: true,
+        name:       getStr('Name'),
+        signingTime:getStr('M'),
+        reason:     getStr('Reason'),
+        location:   getStr('Location'),
+        contact:    getStr('ContactInfo'),
         filter:     filterVal,
         subFilter:  subFilterVal,
-        byteRange,
-        certs,
+        byteRange,  certs,
       });
     } catch(_) {}
   }
@@ -579,7 +572,8 @@ function reset() {
 }
 
 async function analyzePdf(bytes) {
-  const pdfDoc  = await PDFDocument.load(bytes, { ignoreEncryption:true, throwOnInvalidObject:false });
+  // load แบบ lenient เสมอ — signed PDF จะ fail ถ้าใช้ strict
+  const pdfDoc  = await PDFDocument.load(bytes, { ignoreEncryption:true, throwOnInvalidObject:false, updateMetadata:false });
   const context = pdfDoc.context;
   const catalog = pdfDoc.catalog;
 
@@ -615,9 +609,18 @@ async function analyzePdf(bytes) {
     hasSig = sf ? sf.asNumber() >= 3 : false;
   }
 
-  // detect issues
+  // detect xref issues — ถ้าไฟล์ signed แล้ว strict load จะ fail เพราะ append-only
+  // เช็คจาก signature แทน
   let xrefBad = false;
-  try { await PDFDocument.load(bytes, { throwOnInvalidObject:true }); } catch(_) { xrefBad=true; }
+  try {
+    await PDFDocument.load(bytes, { throwOnInvalidObject:true, updateMetadata:false });
+  } catch(e) {
+    // ถ้า error เกี่ยวกับ offset=0 คือ xref จริงๆ เสีย
+    // ถ้าเป็น signed PDF อาจ throw เรื่องอื่น — เช็ค message
+    if (e.message && (e.message.includes('offset') || e.message.includes('xref') || e.message.includes('Invalid object'))) {
+      xrefBad = true;
+    }
+  }
 
   const hasStructTree = catalog.has(PDFName.of('StructTreeRoot'));
   const hasMarkInfo   = catalog.has(PDFName.of('MarkInfo'));

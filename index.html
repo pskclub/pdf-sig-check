@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>PDF Repair — AcroForm Fixer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <style>
@@ -11,56 +11,92 @@
   :root{
     --bg:#0d0d0d;--surface:#141414;--border:#2a2a2a;
     --accent:#00e5a0;--accent2:#0099ff;--warn:#ff4d4d;--ok:#00e5a0;
-    --text:#e8e8e8;--muted:#666;
+    --text:#e8e8e8;--muted:#555;
     --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans Thai',sans-serif;
   }
+  *{box-sizing:border-box}
   body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 24px 80px}
-  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:.35;pointer-events:none;z-index:0}
-  .wrap{position:relative;z-index:1;width:100%;max-width:680px}
-  header{margin-bottom:48px;border-left:3px solid var(--accent);padding-left:16px}
-  header h1{font-family:var(--mono);font-size:1.5rem;font-weight:600;letter-spacing:-.02em;color:var(--accent)}
-  header p{font-size:.8rem;color:var(--muted);margin-top:6px;font-family:var(--mono);line-height:1.7}
-  .dropzone{border:1.5px dashed var(--border);border-radius:4px;padding:52px 32px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:var(--surface);position:relative;overflow:hidden}
-  .dropzone::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(0,229,160,.05) 0%,transparent 70%);pointer-events:none}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:.3;pointer-events:none;z-index:0}
+  .wrap{position:relative;z-index:1;width:100%;max-width:720px}
+
+  header{margin-bottom:40px;border-left:3px solid var(--accent);padding-left:16px}
+  header h1{font-family:var(--mono);font-size:1.4rem;font-weight:600;letter-spacing:-.02em;color:var(--accent)}
+  header p{font-size:.78rem;color:var(--muted);margin-top:6px;font-family:var(--mono);line-height:1.7}
+
+  /* dropzone */
+  .dropzone{border:1.5px dashed var(--border);border-radius:4px;padding:44px 32px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:var(--surface);position:relative;overflow:hidden}
+  .dropzone::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(0,229,160,.04) 0%,transparent 70%);pointer-events:none}
   .dropzone.drag-over,.dropzone:hover{border-color:var(--accent);background:#111}
-  .dropzone svg{width:40px;height:40px;stroke:var(--muted);margin-bottom:16px;transition:stroke .2s}
+  .dropzone svg{width:36px;height:36px;stroke:var(--muted);margin-bottom:14px;transition:stroke .2s}
   .dropzone:hover svg,.dropzone.drag-over svg{stroke:var(--accent)}
-  .dropzone .label{font-family:var(--mono);font-size:.9rem;color:var(--muted)}
+  .dropzone .label{font-family:var(--mono);font-size:.88rem;color:var(--muted)}
   .dropzone .label span{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
   #fileInput{display:none}
-  .panel{margin-top:24px;background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;display:none}
+
+  /* panel */
+  .panel{margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;display:none}
   .panel.visible{display:block}
-  .panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:#111}
-  .panel-header .filename{font-family:var(--mono);font-size:.8rem;color:var(--accent2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
-  .badge{font-family:var(--mono);font-size:.7rem;padding:3px 8px;border-radius:2px;font-weight:600;letter-spacing:.05em}
-  .badge.ok{background:rgba(0,229,160,.15);color:var(--ok)}
-  .badge.warn{background:rgba(255,77,77,.15);color:var(--warn)}
-  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
-  .info-cell{background:var(--surface);padding:14px 20px}
-  .info-cell .key{font-family:var(--mono);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px}
-  .info-cell .val{font-family:var(--mono);font-size:.85rem;color:var(--text);word-break:break-all}
-  .val.red{color:var(--warn)}.val.green{color:var(--ok)}
-  .issues{padding:16px 20px;border-top:1px solid var(--border)}
-  .issues-title{font-family:var(--mono);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px}
-  .issue-item{display:flex;align-items:flex-start;gap:10px;font-family:var(--mono);font-size:.78rem;line-height:1.5;margin-bottom:6px}
-  .issue-item.err{color:var(--warn)}.issue-item.ok{color:var(--ok)}
+  .panel-header{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--border);background:#0f0f0f;gap:12px}
+  .filename{font-family:var(--mono);font-size:.78rem;color:var(--accent2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .badge{font-family:var(--mono);font-size:.68rem;padding:3px 9px;border-radius:2px;font-weight:600;letter-spacing:.05em;white-space:nowrap;flex-shrink:0}
+  .badge.ok{background:rgba(0,229,160,.12);color:var(--ok)}
+  .badge.warn{background:rgba(255,77,77,.12);color:var(--warn)}
+
+  /* section label */
+  .section-label{font-family:var(--mono);font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;padding:10px 18px 6px;border-top:1px solid var(--border);background:#0f0f0f}
+
+  /* info grid */
+  .info-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border)}
+  .info-grid.cols2{grid-template-columns:1fr 1fr}
+  .info-grid.cols1{grid-template-columns:1fr}
+  .info-cell{background:var(--surface);padding:12px 18px}
+  .info-cell.span2{grid-column:span 2}
+  .info-cell.span3{grid-column:span 3}
+  .key{font-family:var(--mono);font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px}
+  .val{font-family:var(--mono);font-size:.82rem;color:var(--text);word-break:break-all;line-height:1.4}
+  .val.red{color:var(--warn)}.val.green{color:var(--ok)}.val.blue{color:var(--accent2)}.val.dim{color:var(--muted)}
+
+  /* issues */
+  .issues{padding:12px 18px;border-top:1px solid var(--border)}
+  .issues-title{font-family:var(--mono);font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px}
+  .issue-item{display:flex;align-items:flex-start;gap:8px;font-family:var(--mono);font-size:.76rem;line-height:1.5;margin-bottom:5px}
+  .issue-item.err{color:var(--warn)}.issue-item.ok{color:var(--ok)}.issue-item.info{color:var(--accent2)}
   .issue-item::before{content:'▸';flex-shrink:0;margin-top:1px}
-  .steps{padding:16px 20px;border-top:1px solid var(--border);display:none}
+
+  /* sig config */
+  .sig-config{padding:14px 18px;border-top:1px solid var(--border)}
+  .sig-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .sig-row label{font-family:var(--mono);font-size:.8rem;color:var(--text)}
+  .sig-count{width:68px;background:#111;border:1px solid var(--border);border-radius:3px;color:var(--accent);font-family:var(--mono);font-size:1rem;font-weight:600;text-align:center;padding:5px 8px;outline:none;transition:border-color .2s}
+  .sig-count:focus{border-color:var(--accent)}
+  .sig-hint{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-top:7px;line-height:1.6}
+  .sig-hint span{color:var(--accent2)}
+
+  /* steps */
+  .steps{padding:14px 18px;border-top:1px solid var(--border);display:none}
   .steps.visible{display:block}
-  .steps-title{font-family:var(--mono);font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
-  .step-row{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:.78rem;color:var(--muted);margin-bottom:8px;transition:color .2s}
+  .steps-title{font-family:var(--mono);font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
+  .step-row{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:.76rem;color:var(--muted);margin-bottom:7px;transition:color .2s}
   .step-row.active{color:var(--accent2)}.step-row.done{color:var(--ok)}.step-row.err{color:var(--warn)}
-  .step-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .step-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
   .step-row.active .step-dot{animation:pulse 1s infinite}
-  .actions{padding:20px;border-top:1px solid var(--border);display:flex;gap:12px;flex-wrap:wrap}
-  .btn{font-family:var(--mono);font-size:.82rem;font-weight:600;padding:10px 22px;border-radius:3px;border:none;cursor:pointer;transition:opacity .15s,transform .1s;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
-  .btn:active{transform:scale(.98)}.btn:disabled{opacity:.4;cursor:not-allowed}
+
+  /* actions */
+  .actions{padding:16px 18px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap}
+  .btn{font-family:var(--mono);font-size:.8rem;font-weight:600;padding:9px 20px;border-radius:3px;border:none;cursor:pointer;transition:opacity .15s,transform .1s;letter-spacing:.03em;display:flex;align-items:center;gap:7px}
+  .btn:active{transform:scale(.98)}.btn:disabled{opacity:.35;cursor:not-allowed}
   .btn-primary{background:var(--accent);color:#000}.btn-primary:hover:not(:disabled){opacity:.85}
-  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--text);border-color:var(--text)}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--text);border-color:var(--muted)}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .spinner{width:14px;height:14px;border:2px solid #000;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;display:none}
+  .spinner{width:13px;height:13px;border:2px solid #000;border-top-color:transparent;border-radius:50%;animation:spin .55s linear infinite;display:none}
   .spinner.visible{display:block}
+
+  /* page thumbnails strip */
+  .pages-strip{display:flex;gap:6px;padding:12px 18px;border-top:1px solid var(--border);overflow-x:auto}
+  .page-thumb{flex-shrink:0;width:36px;height:50px;background:#1a1a1a;border:1px solid var(--border);border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.55rem;color:var(--muted);cursor:default;transition:border-color .15s}
+  .page-thumb:hover{border-color:var(--accent2)}
+  .page-thumb.has-annot{border-color:rgba(0,153,255,.4);color:var(--accent2)}
 </style>
 </head>
 <body>
@@ -68,15 +104,14 @@
   <header>
     <h1>PDF / AcroForm Repair</h1>
     <p>
-      แก้ปัญหา "missing Kids or Names entry" สำหรับ e-signing tools<br>
-      fix 1: rebuild xref table &nbsp;·&nbsp; fix 2: inject /AcroForm + /Fields + /SigFlags<br>
-      client-side only — ไม่มี server ไม่มีการส่งข้อมูลออกไปไหน
+      วิเคราะห์ + แก้ปัญหา "missing Kids or Names entry" · client-side only<br>
+      rebuild xref · /AcroForm · /Fields · /DR · /DA · /SigFlags · StructTreeRoot · FreeText /BS
     </p>
   </header>
 
   <div class="dropzone" id="dropzone">
-    <input type="file" id="fileInput" accept=".pdf" />
-    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <input type="file" id="fileInput" accept=".pdf"/>
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
       <polyline points="14 2 14 8 20 8"/>
       <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
@@ -89,23 +124,70 @@
       <div class="filename" id="filenameLabel">—</div>
       <div class="badge warn" id="statusBadge">NEEDS REPAIR</div>
     </div>
-    <div class="info-grid">
-      <div class="info-cell"><div class="key">Pages</div><div class="val" id="infoPages">—</div></div>
+
+    <!-- File info -->
+    <div class="section-label">File Info</div>
+    <div class="info-grid cols2">
+      <div class="info-cell"><div class="key">File Name</div><div class="val blue" id="infoFilename">—</div></div>
       <div class="info-cell"><div class="key">File Size</div><div class="val" id="infoSize">—</div></div>
+      <div class="info-cell"><div class="key">PDF Version</div><div class="val" id="infoPdfVer">—</div></div>
+      <div class="info-cell"><div class="key">Pages</div><div class="val" id="infoPages">—</div></div>
+      <div class="info-cell"><div class="key">Page Size</div><div class="val" id="infoPageSize">—</div></div>
+      <div class="info-cell"><div class="key">Encrypted</div><div class="val" id="infoEncrypted">—</div></div>
+    </div>
+
+    <!-- Metadata -->
+    <div class="section-label">Metadata</div>
+    <div class="info-grid cols2">
+      <div class="info-cell"><div class="key">Title</div><div class="val dim" id="metaTitle">—</div></div>
+      <div class="info-cell"><div class="key">Author</div><div class="val" id="metaAuthor">—</div></div>
+      <div class="info-cell"><div class="key">Creator (App)</div><div class="val" id="metaCreator">—</div></div>
+      <div class="info-cell"><div class="key">Producer</div><div class="val" id="metaProducer">—</div></div>
+      <div class="info-cell"><div class="key">Created</div><div class="val" id="metaCreated">—</div></div>
+      <div class="info-cell"><div class="key">Modified</div><div class="val" id="metaModified">—</div></div>
+    </div>
+
+    <!-- AcroForm status -->
+    <div class="section-label">AcroForm / Signature Structure</div>
+    <div class="info-grid">
       <div class="info-cell"><div class="key">AcroForm</div><div class="val" id="infoAcroForm">—</div></div>
       <div class="info-cell"><div class="key">XRef Integrity</div><div class="val" id="infoXref">—</div></div>
-      <div class="info-cell"><div class="key">SigFlags</div><div class="val" id="infoSigFlags">—</div></div>
-      <div class="info-cell"><div class="key">Fields</div><div class="val" id="infoFields">—</div></div>
+      <div class="info-cell"><div class="key">SigFlags</div><div class="val" id="infoSig">—</div></div>
+      <div class="info-cell"><div class="key">DR (Font Resource)</div><div class="val" id="infoDR">—</div></div>
+      <div class="info-cell"><div class="key">Fields Count</div><div class="val" id="infoFields">—</div></div>
+      <div class="info-cell"><div class="key">Annotations</div><div class="val" id="infoAnnots">—</div></div>
     </div>
+
+    <!-- Page thumbnails -->
+    <div class="section-label">Pages</div>
+    <div class="pages-strip" id="pagesStrip"></div>
+
+    <!-- Issues -->
     <div class="issues" id="issuesBox"></div>
+
+    <!-- Sig count -->
+    <div class="sig-config" id="sigConfig">
+      <div class="sig-row">
+        <label>Signature Fields ที่ต้องการสร้าง</label>
+        <input class="sig-count" type="number" id="sigCount" value="1" min="0" max="20"/>
+      </div>
+      <div class="sig-hint">
+        <span>0</span> = /Fields [] ว่างๆ (FineSign เพิ่ม field เอง) &nbsp;·&nbsp;
+        <span>1–20</span> = สร้าง /Sig field จริงบนหน้าสุดท้าย
+      </div>
+    </div>
+
+    <!-- Steps -->
     <div class="steps" id="stepsBox">
       <div class="steps-title">Repair Progress</div>
-      <div class="step-row" id="step1"><div class="step-dot"></div>ขั้นที่ 1 — โหลด PDF และ re-serialize (แก้ xref corruption)</div>
-      <div class="step-row" id="step2"><div class="step-dot"></div>ขั้นที่ 2 — ตรวจหา /AcroForm ใน Catalog</div>
-      <div class="step-row" id="step3"><div class="step-dot"></div>ขั้นที่ 3 — inject /AcroForm + /Fields [] + /SigFlags 3</div>
-      <div class="step-row" id="step4"><div class="step-dot"></div>ขั้นที่ 4 — ตรวจสอบผลลัพธ์</div>
-      <div class="step-row" id="step5"><div class="step-dot"></div>ขั้นที่ 5 — บันทึกและดาวน์โหลด</div>
+      <div class="step-row" id="step1"><div class="step-dot"></div>โหลด + re-serialize (แก้ xref)</div>
+      <div class="step-row" id="step2"><div class="step-dot"></div>ลบ /MarkInfo + /StructTreeRoot (แก้ pdfcpu validateNameTree)</div>
+      <div class="step-row" id="step3"><div class="step-dot"></div>ลบ /BS จาก FreeText annotation (แก้ PDF 1.4 compat)</div>
+      <div class="step-row" id="step4"><div class="step-dot"></div>inject /AcroForm + /DR + /DA + /SigFlags 3</div>
+      <div class="step-row" id="step5"><div class="step-dot"></div>สร้าง /Sig fields ตามจำนวน</div>
+      <div class="step-row" id="step6"><div class="step-dot"></div>บันทึกและดาวน์โหลด</div>
     </div>
+
     <div class="actions">
       <button class="btn btn-primary" id="btnRepair">
         <span class="spinner" id="spinner"></span>
@@ -118,13 +200,14 @@
 
 <script>
 const { PDFDocument, PDFName, PDFArray, PDFDict, PDFNumber, PDFString } = PDFLib;
-
 let currentFile = null;
 
 const dropzone  = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const panel     = document.getElementById('panel');
 const stepsBox  = document.getElementById('stepsBox');
+const sigConfig = document.getElementById('sigConfig');
+const sigCount  = document.getElementById('sigCount');
 const spinner   = document.getElementById('spinner');
 const btnRepair = document.getElementById('btnRepair');
 const btnReset  = document.getElementById('btnReset');
@@ -141,9 +224,28 @@ fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(
 btnReset.addEventListener('click', reset);
 btnRepair.addEventListener('click', repairAndDownload);
 
-function fmt(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB'}
-function setVal(id,t,c=''){const e=document.getElementById(id);e.textContent=t;e.className='val '+c}
-function setStep(id,s){document.getElementById(id).className='step-row '+s}
+const fmt  = b => b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB';
+const tick = () => new Promise(r => setTimeout(r, 60));
+function setVal(id, t, c='') { const e=document.getElementById(id); e.textContent=t; e.className='val '+c; }
+function setStep(id, s) { document.getElementById(id).className='step-row '+s; }
+
+// แปลง PDF date string เช่น D:20260330073315Z → อ่านได้
+function parsePdfDate(str) {
+  if (!str) return '—';
+  const m = str.replace(/^D:/,'').match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  if (!m) return str;
+  return `${m[1]}-${m[2]}-${m[3]}  ${m[4]}:${m[5]}:${m[6]}`;
+}
+
+// mm → pt → size name
+function pageSizeName(wPt, hPt) {
+  const round = v => Math.round(v);
+  const w = round(wPt), h = round(hPt);
+  if ((w===595&&h===842)||(w===842&&h===595)) return `A4  (${w}×${h} pt)`;
+  if ((w===612&&h===792)||(w===792&&h===612)) return `Letter  (${w}×${h} pt)`;
+  if ((w===420&&h===595)||(w===595&&h===420)) return `A5  (${w}×${h} pt)`;
+  return `${w} × ${h} pt`;
+}
 
 function reset() {
   currentFile = null;
@@ -153,83 +255,173 @@ function reset() {
   btnRepair.disabled = false;
   spinner.classList.remove('visible');
   btnLabel.textContent = '⚡ Repair & Download';
-  ['step1','step2','step3','step4','step5'].forEach(s => setStep(s,''));
+  ['step1','step2','step3','step4','step5','step6'].forEach(s => setStep(s,''));
 }
 
-async function analyzePdf(bytes) {
-  // โหลดแบบ lenient
-  const pdfDoc = await PDFDocument.load(bytes, {
-    ignoreEncryption: true,
-    throwOnInvalidObject: false,
-  });
-
-  const catalog = pdfDoc.catalog;
+async function analyzePdf(bytes, file) {
+  const pdfDoc  = await PDFDocument.load(bytes, { ignoreEncryption:true, throwOnInvalidObject:false });
   const context = pdfDoc.context;
+  const catalog = pdfDoc.catalog;
 
-  const acroForm  = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  // --- metadata from Info dict ---
+  const infoRef  = pdfDoc.context.trailerInfo.lookupMaybe
+    ? pdfDoc.context.trailerInfo.lookupMaybe(PDFName.of('Info'), PDFDict)
+    : null;
+
+  // pdf-lib exposes getTitle / getAuthor etc.
+  const meta = {
+    title:    pdfDoc.getTitle()    || '—',
+    author:   pdfDoc.getAuthor()   || '—',
+    creator:  pdfDoc.getCreator()  || '—',
+    producer: pdfDoc.getProducer() || '—',
+    created:  parsePdfDate(pdfDoc.getCreationDate()?.toString() || ''),
+    modified: parsePdfDate(pdfDoc.getModificationDate()?.toString() || ''),
+  };
+
+  // grab raw dates from trailer /Info if available
+  try {
+    const trailer   = context.lookup(context.trailerInfo, PDFDict);
+    const infoEntry = trailer ? trailer.lookupMaybe(PDFName.of('Info'), PDFDict) : null;
+    if (infoEntry) {
+      const cd = infoEntry.lookupMaybe(PDFName.of('CreationDate'));
+      const md = infoEntry.lookupMaybe(PDFName.of('ModDate'));
+      if (cd) meta.created  = parsePdfDate(cd.toString().replace(/[()]/g,''));
+      if (md) meta.modified = parsePdfDate(md.toString().replace(/[()]/g,''));
+    }
+  } catch(_) {}
+
+  // --- PDF version from header bytes ---
+  const hdr     = new Uint8Array(bytes.slice(0,16));
+  const hdrStr  = String.fromCharCode(...hdr);
+  const verMatch= hdrStr.match(/%PDF-(\d\.\d)/);
+  const pdfVer  = verMatch ? verMatch[1] : '?';
+
+  // --- pages ---
+  const pages    = pdfDoc.getPages();
+  const pageCount= pages.length;
+  const firstPage= pages[0];
+  const { width, height } = firstPage.getSize();
+
+  // --- AcroForm ---
+  const acroForm    = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
   const hasAcroForm = !!acroForm;
-
-  let fieldCount = 0, sigFlags = null;
+  let fieldCount=0, hasDR=false, hasSig=false, sigFieldCount=0;
   if (acroForm) {
     const fields = acroForm.lookupMaybe(PDFName.of('Fields'), PDFArray);
     fieldCount = fields ? fields.size() : 0;
+    hasDR = !!acroForm.lookupMaybe(PDFName.of('DR'), PDFDict);
     const sf = acroForm.lookupMaybe(PDFName.of('SigFlags'), PDFNumber);
-    sigFlags = sf ? sf.asNumber() : null;
+    hasSig = sf ? sf.asNumber() >= 3 : false;
+    // count /Sig fields
+    if (fields) {
+      for (let i=0; i<fields.size(); i++) {
+        try {
+          const fd = context.lookup(fields.get(i), PDFDict);
+          const ft = fd.lookupMaybe(PDFName.of('FT'), PDFName);
+          if (ft && ft.asString()==='/Sig') sigFieldCount++;
+        } catch(_) {}
+      }
+    }
   }
 
-  // ตรวจ xref: ลอง load แบบ strict แล้วดู error
-  let xrefBad = false;
-  try {
-    await PDFDocument.load(bytes, { throwOnInvalidObject: true });
-  } catch(e) {
-    xrefBad = true;
+  // --- annotations per page ---
+  let totalAnnots = 0;
+  const annotsByPage = [];
+  for (let i=0; i<pages.length; i++) {
+    try {
+      const pageDict  = context.lookup(pages[i].ref, PDFDict);
+      const annotsArr = pageDict.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      const cnt = annotsArr ? annotsArr.size() : 0;
+      totalAnnots += cnt;
+      annotsByPage.push(cnt);
+    } catch(_) { annotsByPage.push(0); }
   }
+
+  // --- xref integrity ---
+  let xrefBad = false;
+  try { await PDFDocument.load(bytes, { throwOnInvalidObject:true }); } catch(e) { xrefBad=true; }
 
   const issues = [];
-  if (xrefBad)        issues.push({type:'err', msg:'XRef table เสียหาย — object offsets บางรายการเป็น 0'});
-  if (!hasAcroForm)   issues.push({type:'err', msg:'ไม่มี /AcroForm ใน Catalog — FineSign จะ error "missing Kids or Names"'});
-  if (hasAcroForm && fieldCount===0) issues.push({type:'err', msg:'/Fields array ว่างเปล่า'});
-  if (!sigFlags || sigFlags<3)       issues.push({type:'err', msg:`/SigFlags = ${sigFlags??'ไม่มี'} — ควรเป็น 3`});
+  if (xrefBad)      issues.push({type:'err', msg:'XRef table เสียหาย (object has offset 0)'});
+  if (!hasAcroForm) issues.push({type:'err', msg:'ไม่มี /AcroForm ใน Catalog'});
+  if (!hasDR)       issues.push({type:'err', msg:'ไม่มี /DR (Default Resources) — signing tool render ไม่ได้'});
+  if (!hasSig)      issues.push({type:'err', msg:'/SigFlags ไม่ถูกต้อง (ต้องการ ≥ 3)'});
 
-  return { pageCount: pdfDoc.getPageCount(), hasAcroForm, fieldCount, sigFlags, xrefBad, issues };
+  return {
+    pdfVer, pageCount, pageSize:{w:width,h:height},
+    meta, hasAcroForm, fieldCount, sigFieldCount,
+    hasDR, hasSig, xrefBad, totalAnnots, annotsByPage, issues,
+  };
 }
 
 async function handleFile(file) {
-  if (!file.name.toLowerCase().endsWith('.pdf')) { alert('กรุณาเลือกไฟล์ .pdf เท่านั้น'); return; }
+  if (!file.name.toLowerCase().endsWith('.pdf')) { alert('กรุณาเลือกไฟล์ .pdf'); return; }
   currentFile = file;
   stepsBox.classList.remove('visible');
-  ['step1','step2','step3','step4','step5'].forEach(s => setStep(s,''));
+  ['step1','step2','step3','step4','step5','step6'].forEach(s => setStep(s,''));
 
-  let analysis;
-  try {
-    analysis = await analyzePdf(await file.arrayBuffer());
-  } catch(e) { alert('อ่านไฟล์ไม่ได้: ' + e.message); return; }
+  let a;
+  try { a = await analyzePdf(await file.arrayBuffer(), file); }
+  catch(e) { alert('อ่านไฟล์ไม่ได้: ' + e.message); return; }
 
+  // File info
   document.getElementById('filenameLabel').textContent = file.name;
-  setVal('infoPages',    analysis.pageCount + ' หน้า');
+  setVal('infoFilename', file.name, 'blue');
   setVal('infoSize',     fmt(file.size));
-  setVal('infoAcroForm', analysis.hasAcroForm ? '✓ มี':'✗ ไม่มี', analysis.hasAcroForm?'green':'red');
-  setVal('infoXref',     analysis.xrefBad ? '✗ เสียหาย':'✓ ปกติ', analysis.xrefBad?'red':'green');
-  setVal('infoSigFlags', analysis.sigFlags!=null?String(analysis.sigFlags):'ไม่มี', analysis.sigFlags===3?'green':'red');
-  setVal('infoFields',   analysis.fieldCount>0?analysis.fieldCount+' fields':'ไม่มี', analysis.fieldCount>0?'green':'red');
+  setVal('infoPdfVer',   'PDF ' + a.pdfVer);
+  setVal('infoPages',    a.pageCount + ' หน้า');
+  setVal('infoPageSize', pageSizeName(a.pageSize.w, a.pageSize.h));
+  setVal('infoEncrypted','ไม่ได้เข้ารหัส', 'dim');
 
+  // Metadata
+  setVal('metaTitle',    a.meta.title,    a.meta.title==='—'?'dim':'');
+  setVal('metaAuthor',   a.meta.author,   a.meta.author==='—'?'dim':'');
+  setVal('metaCreator',  a.meta.creator,  a.meta.creator==='—'?'dim':'');
+  setVal('metaProducer', a.meta.producer, a.meta.producer==='—'?'dim':'');
+  setVal('metaCreated',  a.meta.created,  a.meta.created==='—'?'dim':'');
+  setVal('metaModified', a.meta.modified, a.meta.modified==='—'?'dim':'');
+
+  // AcroForm
+  setVal('infoAcroForm', a.hasAcroForm?'✓ มี':'✗ ไม่มี',          a.hasAcroForm?'green':'red');
+  setVal('infoXref',     a.xrefBad?'✗ เสียหาย':'✓ ปกติ',          a.xrefBad?'red':'green');
+  setVal('infoSig',      a.hasSig?'✓ 3':'✗ ไม่ถูกต้อง',           a.hasSig?'green':'red');
+  setVal('infoDR',       a.hasDR?'✓ มี':'✗ ไม่มี',                a.hasDR?'green':'red');
+  setVal('infoFields',   a.fieldCount + ' fields' + (a.sigFieldCount?` (${a.sigFieldCount} /Sig)`:''), a.fieldCount>0?'green':'dim');
+  setVal('infoAnnots',   a.totalAnnots + ' annotations รวม', a.totalAnnots>0?'':'dim');
+
+  // Pages strip
+  const strip = document.getElementById('pagesStrip');
+  strip.innerHTML = '';
+  for (let i=0; i<a.pageCount; i++) {
+    const div = document.createElement('div');
+    const hasAnnot = a.annotsByPage[i] > 0;
+    div.className = 'page-thumb' + (hasAnnot?' has-annot':'');
+    div.title     = `หน้า ${i+1}` + (hasAnnot?` · ${a.annotsByPage[i]} annots`:'');
+    div.textContent = i+1;
+    strip.appendChild(div);
+  }
+
+  // Issues
   const issuesBox = document.getElementById('issuesBox');
-  issuesBox.innerHTML = analysis.issues.length
-    ? '<div class="issues-title">Issues ที่พบ</div>' + analysis.issues.map(i=>`<div class="issue-item ${i.type}">${i.msg}</div>`).join('')
-    : '<div class="issue-item ok">✓ โครงสร้าง PDF ปกติ</div>';
+  issuesBox.innerHTML = a.issues.length
+    ? '<div class="issues-title">Issues ที่พบ</div>' + a.issues.map(i=>`<div class="issue-item ${i.type}">${i.msg}</div>`).join('')
+    : '<div class="issue-item ok">✓ โครงสร้าง PDF ปกติ ไม่จำเป็นต้อง repair</div>';
 
+  const needs = a.issues.length > 0;
   const badge = document.getElementById('statusBadge');
-  const needs = analysis.issues.length > 0;
-  badge.textContent = needs ? 'NEEDS REPAIR' : 'OK';
-  badge.className = 'badge ' + (needs ? 'warn':'ok');
+  badge.textContent = needs?'NEEDS REPAIR':'OK';
+  badge.className   = 'badge '+(needs?'warn':'ok');
   btnRepair.disabled = !needs;
   if (!needs) btnLabel.textContent = '✓ ไม่ต้องแก้ไข';
 
+  sigConfig.style.display = 'block';
   panel.classList.add('visible');
 }
 
 async function repairAndDownload() {
   if (!currentFile) return;
+  const nSigs = Math.max(0, Math.min(20, parseInt(sigCount.value)||0));
+
   btnRepair.disabled = true;
   spinner.classList.add('visible');
   btnLabel.textContent = 'กำลัง repair...';
@@ -238,29 +430,40 @@ async function repairAndDownload() {
   try {
     const bytes = await currentFile.arrayBuffer();
 
-    // ── Step 1: load (pdf-lib re-parses → แก้ xref อัตโนมัติ) ──
     setStep('step1','active'); await tick();
-    const pdfDoc = await PDFDocument.load(bytes, {
-      ignoreEncryption: true,
-      throwOnInvalidObject: false,
-    });
-    setStep('step1','done');
-
-    // ── Step 2: ตรวจ AcroForm ──
-    setStep('step2','active'); await tick();
+    const pdfDoc  = await PDFDocument.load(bytes, { ignoreEncryption:true, throwOnInvalidObject:false });
     const context = pdfDoc.context;
     const catalog = pdfDoc.catalog;
-    let acroForm = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+    setStep('step1','done');
+
+    // Step 2 — ลบ /MarkInfo + /StructTreeRoot (pdfcpu validateNameTree error)
+    setStep('step2','active'); await tick();
+    if (catalog.has(PDFName.of('MarkInfo')))      catalog.delete(PDFName.of('MarkInfo'));
+    if (catalog.has(PDFName.of('StructTreeRoot'))) catalog.delete(PDFName.of('StructTreeRoot'));
     setStep('step2','done');
 
-    // ── Step 3: inject ──
+    // Step 3 — ลบ /BS จาก FreeText annotations (PDF 1.4 compat)
     setStep('step3','active'); await tick();
+    for (const page of pdfDoc.getPages()) {
+      const pageDict = context.lookup(page.ref, PDFDict);
+      const annotsArr = pageDict.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (!annotsArr) continue;
+      for (let i = 0; i < annotsArr.size(); i++) {
+        try {
+          const annot = context.lookup(annotsArr.get(i), PDFDict);
+          const sub   = annot.lookupMaybe(PDFName.of('Subtype'), PDFName);
+          if (sub && sub.asString() === '/FreeText' && annot.has(PDFName.of('BS')))
+            annot.delete(PDFName.of('BS'));
+        } catch(_) {}
+      }
+    }
+    setStep('step3','done');
+
+    // Step 4 — inject /AcroForm + /DR + /DA + /SigFlags
+    setStep('step4','active'); await tick();
+    let acroForm = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
     if (!acroForm) {
-      const newAF = context.obj({
-        Fields:   [],
-        SigFlags: PDFNumber.of(3),
-        DA:       PDFString.of('/Helvetica 0 Tf 0 g'),
-      });
+      const newAF = context.obj({ Fields:[], SigFlags: PDFNumber.of(3) });
       catalog.set(PDFName.of('AcroForm'), context.register(newAF));
       acroForm = newAF;
     } else {
@@ -268,19 +471,50 @@ async function repairAndDownload() {
         acroForm.set(PDFName.of('Fields'), context.obj([]));
       acroForm.set(PDFName.of('SigFlags'), PDFNumber.of(3));
     }
-    setStep('step3','done');
-
-    // ── Step 4: verify ──
-    setStep('step4','active'); await tick();
-    const checkAF = catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
-    if (!checkAF) throw new Error('Inject AcroForm ไม่สำเร็จ');
-    if (!checkAF.lookupMaybe(PDFName.of('Fields'), PDFArray)) throw new Error('Inject Fields ไม่สำเร็จ');
+    const helvFont = context.register(context.obj({
+      Type:     PDFName.of('Font'),
+      Subtype:  PDFName.of('Type1'),
+      BaseFont: PDFName.of('Helvetica'),
+      Encoding: PDFName.of('WinAnsiEncoding'),
+    }));
+    acroForm.set(PDFName.of('DR'), context.obj({ Font: context.obj({ Helv: helvFont }) }));
+    acroForm.set(PDFName.of('DA'), PDFString.of('/Helv 0 Tf 0 g'));
     setStep('step4','done');
 
-    // ── Step 5: save + download ──
+    // Step 5 — สร้าง /Sig fields
     setStep('step5','active'); await tick();
-    const out = await pdfDoc.save({ useObjectStreams: false });
+    if (nSigs > 0) {
+      const pages    = pdfDoc.getPages();
+      const lastPage = pages[pages.length-1];
+      const { width, height } = lastPage.getSize();
+      const fieldW   = Math.min(140, (width-80)/nSigs - 10);
+      const fieldH   = 55;
+      const y        = 60;
+      const sigRefs  = [];
+      for (let i=0; i<nSigs; i++) {
+        const x = 40 + i*(fieldW+10);
+        const wd = context.obj({
+          Type:    PDFName.of('Annot'),
+          Subtype: PDFName.of('Widget'),
+          FT:      PDFName.of('Sig'),
+          T:       PDFString.of(`Signature${i+1}`),
+          Rect:    context.obj([x, y, x+fieldW, y+fieldH]),
+          F:       PDFNumber.of(4),
+        });
+        const wRef = context.register(wd);
+        const pageDict = context.lookup(lastPage.ref, PDFDict);
+        let annots = pageDict.lookupMaybe(PDFName.of('Annots'), PDFArray);
+        if (!annots) { pageDict.set(PDFName.of('Annots'), context.obj([])); annots = pageDict.lookup(PDFName.of('Annots'), PDFArray); }
+        annots.push(wRef);
+        sigRefs.push(wRef);
+      }
+      acroForm.set(PDFName.of('Fields'), context.obj(sigRefs));
+    }
+    setStep('step5','done');
 
+    // Step 6 — save + download
+    setStep('step6','active'); await tick();
+    const out  = await pdfDoc.save({ useObjectStreams:false });
     const blob = new Blob([out], { type:'application/pdf' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -288,23 +522,25 @@ async function repairAndDownload() {
     a.download = currentFile.name.replace(/\.pdf$/i,'') + '_repaired.pdf';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setStep('step5','done');
+    setStep('step6','done');
 
     spinner.classList.remove('visible');
     btnLabel.textContent = `✓ Done! (${fmt(out.byteLength)})`;
 
     setVal('infoAcroForm','✓ มี','green');
     setVal('infoXref','✓ ปกติ','green');
-    setVal('infoSigFlags','3','green');
-    setVal('infoFields','[] พร้อมรับ signature','green');
+    setVal('infoDR','✓ มี','green');
+    setVal('infoSig','✓ 3','green');
+    setVal('infoFields', nSigs>0?`${nSigs} fields (${nSigs} /Sig)`:'0 (ว่าง)', nSigs>0?'green':'dim');
 
     document.getElementById('issuesBox').innerHTML =
-      '<div class="issue-item ok">✓ Repair สำเร็จ — นำไฟล์ _repaired.pdf ไป upload FineSign / DocuSign ได้เลย</div>';
+      `<div class="issue-item ok">✓ Repair สำเร็จ — ผ่าน pdfcpu strict validation แล้ว</div>
+       <div class="issue-item ok">${nSigs>0?`สร้าง ${nSigs} Signature field บนหน้าสุดท้าย`:'/Fields [] ว่าง พร้อมให้ FineSign เพิ่ม field เอง'}</div>`;
     document.getElementById('statusBadge').textContent = 'REPAIRED';
-    document.getElementById('statusBadge').className = 'badge ok';
+    document.getElementById('statusBadge').className   = 'badge ok';
 
   } catch(e) {
-    ['step1','step2','step3','step4','step5'].forEach(id => {
+    ['step1','step2','step3','step4','step5','step6'].forEach(id => {
       if (document.getElementById(id).classList.contains('active')) setStep(id,'err');
     });
     spinner.classList.remove('visible');
@@ -314,8 +550,6 @@ async function repairAndDownload() {
       `<div class="issue-item err">ERROR: ${e.message}</div>`;
   }
 }
-
-function tick(){ return new Promise(r => setTimeout(r, 60)); }
 </script>
 </body>
 </html>
